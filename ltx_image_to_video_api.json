@@ -1,0 +1,274 @@
+{
+  "6": {
+    "inputs": {
+      "text": "A beautifully animated hand-painted editorial illustration. The same character walks slowly and naturally from left to right, maintaining the exact same side profile throughout the entire animation. Gentle alternating leg movements, subtle arm swinging, the handbag stays in the same hand and moves naturally with each step. Preserve the original character design, clothing, proportions, colours and artistic watercolor texture. Static camera, smooth consistent animation, soft natural movement.",
+      "clip": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "Character rotation, turning around, changing direction, changing camera angle, handbag changing hands, clothing changes, distorted limbs, extra fingers, extra legs, morphing, flickering, sudden movements, inconsistent character design.",
+      "clip": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "101",
+        1
+      ],
+      "vae": [
+        "44",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "38": {
+    "inputs": {
+      "clip_name": "t5xxl_fp8_e4m3fn.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "44": {
+    "inputs": {
+      "ckpt_name": "ltxv-2b-0.9.6-distilled-04-25.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "69": {
+    "inputs": {
+      "frame_rate": 24.000000000000004,
+      "positive": [
+        "95",
+        0
+      ],
+      "negative": [
+        "95",
+        1
+      ]
+    },
+    "class_type": "LTXVConditioning",
+    "_meta": {
+      "title": "LTXVConditioning",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "78": {
+    "inputs": {
+      "image": "_20__00001_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "82": {
+    "inputs": {
+      "img_compression": 38,
+      "image": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "LTXVPreprocess",
+    "_meta": {
+      "title": "LTXV Preprocess",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "95": {
+    "inputs": {
+      "width": 768,
+      "height": 512,
+      "length": 97,
+      "batch_size": 1,
+      "strength": 1,
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "vae": [
+        "44",
+        2
+      ],
+      "image": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "LTXVImgToVideo",
+    "_meta": {
+      "title": "LTXVImgToVideo",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "97": {
+    "inputs": {
+      "sampler_name": "euler_ancestral"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.15"
+    }
+  },
+  "98": {
+    "inputs": {
+      "float_list": [
+        "100",
+        0
+      ]
+    },
+    "class_type": "FloatToSigmas",
+    "_meta": {
+      "title": "Float To Sigmas",
+      "cnr_id": "comfyui-kjnodes",
+      "ver": "0addfc6101f7a834c7fb6e0a1b26529360ab5350"
+    }
+  },
+  "99": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "44",
+        0
+      ],
+      "positive": [
+        "69",
+        0
+      ],
+      "negative": [
+        "69",
+        1
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFG Guider",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.26"
+    }
+  },
+  "100": {
+    "inputs": {
+      "string": "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0"
+    },
+    "class_type": "StringToFloatList",
+    "_meta": {
+      "title": "String to Float List",
+      "cnr_id": "comfyui-kjnodes",
+      "ver": "0addfc6101f7a834c7fb6e0a1b26529360ab5350"
+    }
+  },
+  "101": {
+    "inputs": {
+      "noise": [
+        "102",
+        0
+      ],
+      "guider": [
+        "99",
+        0
+      ],
+      "sampler": [
+        "97",
+        0
+      ],
+      "sigmas": [
+        "98",
+        0
+      ],
+      "latent_image": [
+        "95",
+        2
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.15"
+    }
+  },
+  "102": {
+    "inputs": {
+      "noise_seed": 45
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
+    }
+  },
+  "103": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "ltxv",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 20,
+      "save_metadata": false,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢",
+      "cnr_id": "comfyui-videohelpersuite",
+      "ver": "972c87da577b47211c4e9aeed30dc38c7bae607f"
+    }
+  }
+}

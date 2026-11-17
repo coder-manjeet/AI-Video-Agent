@@ -1,0 +1,102 @@
+# Virtual environments
+.venv/
+.venv-tts/
+venv/
+env/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+token*.txt
+*.token
+
+# Model weights and checkpoints
+models/
+weights/
+checkpoints/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+*.gguf
+
+# Generated videos and audio
+output/
+outputs/
+generated/
+renders/
+projects/*/render/
+projects/*/audio/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+
+# Generated images - do not ignore source artwork
+generated_images/
+projects/*/scenes/*/generated/
+projects/*/storyboard/generated/
+*_generated.png
+*_generated.jpg
+*_generated.jpeg
+
+# ComfyUI runtime output
+ComfyUI/output/
+ComfyUI/input/
+ComfyUI/temp/
+comfyui_output/
+comfyui_input/
+
+# Temporary files and logs
+tmp/
+temp/
+.tmp/
+logs/
+*.log
+*.tmp
+~$*
+*.swp
+
+# OS files
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Explicitly preserve project source/config/docs/workflows
+!workflows/
+!workflows/**
+!docs/
+!docs/**
+!ltx_image_to_video_api.json
+!opencode.json

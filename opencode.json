@@ -1,0 +1,17 @@
+
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "local-video-agent": {
+        "type": "local",
+        "command": [
+          "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
+          "C:\\AI-Video-Agent\\server.py"
+        ],
+        "cwd": "C:\\AI-Video-Agent",
+        "codemode": false
+      }
+    }
+  }
+}
