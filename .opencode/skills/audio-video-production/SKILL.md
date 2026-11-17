@@ -5,7 +5,7 @@ description: Use for FFmpeg/ffprobe work — audio mixing, time-stretch, subtitl
 
 # Audio/Video Production
 
-FFmpeg and ffprobe 9.0.1 (essentials build) are on PATH. Use PowerShell `&` invocation. Never overwrite a finished video without explicit permission.
+FFmpeg and ffprobe 9.0.1 (essentials build) are on PATH at `C:\ffmpeg\ffmpeg-9.0.1-essentials_build\bin`. Use PowerShell `&` invocation. Never overwrite a finished video without explicit permission. For reusable work, call `media_service.py` or the `local-media-agent` MCP tools instead of hand-writing one-off commands.
 
 ## Workflow
 1. **Probe** inputs before processing: `& ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1 input.wav`
@@ -20,3 +20,18 @@ FFmpeg and ffprobe 9.0.1 (essentials build) are on PATH. Use PowerShell `&` invo
 - Prefer stream copy for lossless trims (`-c copy`) and re-encode only when filters require it.
 - Check A/V duration drift after every render; report mismatches instead of shipping silently.
 - Store logs in ignored `logs/`; keep generated media out of Git.
+
+## Reusable media service (Phase 1)
+
+`media_service.py` implements the render workflow above with:
+
+- `probe_media()` — ffprobe duration, resolution, FPS, codecs, sample rate, channels and size.
+- `merge_narration()` — temp-file render, AAC audio, configurable volume, ffprobe validation before promotion, and `overwrite=False` by default.
+- `validate_media()` — structured existence, readability, stream and duration verdicts.
+
+Duration policies are explicit and always reported in `warnings`:
+
+- `trim_audio`: stream-copy video; trim longer narration or pad shorter narration with silence to the video length.
+- `extend_video`: freeze the final frame with `tpad` until narration ends (requires libx264 re-encode); never cut narration.
+
+MCP tools with the same names are exposed by `media_server.py` (`local-media-agent`). Verified live output: `C:\AI-Video-Agent\test-output\first_narrated_video.mp4` (4.25 s, 768x512, h264 + AAC). Timeouts default to 180 s for ffmpeg and 30 s for ffprobe; override with `MEDIA_FFMPEG_TIMEOUT_S` / `MEDIA_FFPROBE_TIMEOUT_S`.

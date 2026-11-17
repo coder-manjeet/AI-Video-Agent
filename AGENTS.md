@@ -4,6 +4,7 @@ Local Video Agent — local-only AI video pipeline. Windows 11, PowerShell only.
 
 ## Architecture
 - `server.py` — FastMCP stdio tools; `comfyui_client.py` — ComfyUI HTTP client and workflow patching; `ltx_image_to_video_api.json` — tested LTX workflow.
+- `tts_service.py` / `tts_server.py` / `tts_worker.py` — Chatterbox TTS under `.venv-tts`; `media_service.py` / `media_server.py` — FFmpeg media operations under `.venv`.
 - `.venv` = MCP + dev tooling; `.venv-tts` = CUDA/Torch/TTS. Never mix or recreate either without approval.
 - Planned `src/local_video_agent/` migration is deferred; keep business logic out of `@mcp.tool()` bodies.
 - Scene-based pipeline with `scenes.json`; never overwrite finished media without permission.
@@ -11,13 +12,13 @@ Local Video Agent — local-only AI video pipeline. Windows 11, PowerShell only.
 ## Commands (PowerShell only)
 ```powershell
 & .\.venv\Scripts\python.exe -m ruff check .
-& .\.venv\Scripts\python.exe -m mypy server.py comfyui_client.py
+& .\.venv\Scripts\python.exe -m mypy server.py comfyui_client.py tts_service.py tts_server.py tts_worker.py media_service.py media_server.py
 & .\.venv\Scripts\python.exe -m pytest -q
 ```
 No bash, no POSIX paths in committed commands.
 
 ## Environment and config
-- Configure via environment variables (`COMFYUI_URL`). `.env` files are gitignored and **not** auto-loaded; set variables in the PowerShell session.
+- Configure via environment variables (`COMFYUI_URL`, `TTS_SUBPROCESS_TIMEOUT_S`, `MEDIA_FFMPEG_BIN`, `MEDIA_FFPROBE_BIN`, `MEDIA_FFMPEG_TIMEOUT_S`, `MEDIA_FFPROBE_TIMEOUT_S`). `.env` files are gitignored and **not** auto-loaded; set variables in the PowerShell session.
 - Never commit secrets, tokens, personal voice recordings, model weights, or generated media.
 
 ## Engineering rules

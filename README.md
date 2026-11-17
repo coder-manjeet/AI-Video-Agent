@@ -22,6 +22,10 @@ into a validated, YouTube-ready MP4 using local models and services.
 | Chatterbox TTS English/Hindi smoke tests | Complete |
 | Chatterbox TTS service | Complete |
 | TTS MCP integration | Verified end to end |
+| FFmpeg / ffprobe availability | 9.0.1 essentials build on PATH |
+| FFmpeg media service (Phase 1) | Complete |
+| Media MCP integration | Connected — three independent servers registered |
+| Live narrated MP4 | Verified — `test-output/first_narrated_video.mp4` |
 | Git repository / remote | Local repository initialized; no commits or remote |
 
 This repository currently contains a small, working MCP integration. The broader service architecture is being introduced gradually, without breaking that integration.
@@ -64,6 +68,8 @@ C:\AI-Video-Agent\
 ├── tts_service.py                  # provider-independent TTS service
 ├── tts_server.py                   # FastMCP tools for local-tts-agent
 ├── tts_worker.py                   # .venv-tts generation worker
+├── media_service.py                # FFmpeg/ffprobe operations (no MCP imports)
+├── media_server.py                 # FastMCP tools for local-media-agent
 ├── tests\                          # unit and integration tests
 ├── docs\                           # project status and decisions
 ├── .gitignore                      # repository hygiene
@@ -82,6 +88,12 @@ Defined in `tts_server.py` (`local-tts-agent`):
 
 - `generate_speech(text, output_path, language="en", voice="chatterbox-default-narrator", reference_wav=None, expressiveness=None, overwrite=False)` — generates a 24 kHz WAV; existing files are refused unless `overwrite=True`
 - `get_audio_metadata(wav_path)` — returns path, duration, sample rate, sample count, peak and RMS without loading a model
+
+Defined in `media_server.py` (`local-media-agent`):
+
+- `probe_media(path, timeout_s=None)` — ffprobe stream metadata with structured errors for missing/invalid files
+- `merge_narration(video_path, narration_path, output_path, volume=1.0, duration_policy="trim_audio", overwrite=False, timeout_s=None)` — renders a validated MP4 and reports every duration adjustment
+- `validate_media(path, expected_duration_s=None, duration_tolerance_s=0.5, timeout_s=None)` — structured existence/readability, stream and duration checks
 
 ## Target architecture
 
@@ -126,6 +138,7 @@ Business logic will remain independent of MCP tool definitions.
 - OpenCode 2.3.0
 - ComfyUI Desktop 0.45.3 at `http://127.0.0.1:8000`
 - Python 3.11.9 for project environments
+- FFmpeg and ffprobe 9.0.1 (essentials build) on PATH: `C:\ffmpeg\ffmpeg-9.0.1-essentials_build\bin`
 - Git 2.54.0.windows.1 or newer
 
 ### Verified environments
@@ -213,7 +226,7 @@ Important: this workflow has already been tested successfully. Do not replace it
 
 ## MCP configuration
 
-`opencode.json` registers two local servers:
+`opencode.json` registers three independent local servers:
 
 ```json
 {
@@ -237,6 +250,15 @@ Important: this workflow has already been tested successfully. Do not replace it
         ],
         "cwd": "C:\\AI-Video-Agent",
         "codemode": false
+      },
+      "local-media-agent": {
+        "type": "local",
+        "command": [
+          "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
+          "C:\\AI-Video-Agent\\media_server.py"
+        ],
+        "cwd": "C:\\AI-Video-Agent",
+        "codemode": false
       }
     }
   }
@@ -251,9 +273,12 @@ create_video
 check_video_status
 generate_speech
 get_audio_metadata
+probe_media
+merge_narration
+validate_media
 ```
 
-Both MCP servers run under `.venv`. `generate_speech` launches `tts_worker.py` with `.venv-tts` so Torch and Chatterbox stay out of the MCP process; `get_audio_metadata` needs no model at all. See [ADR 0004](docs/adr/0004-tts-mcp-subprocess-isolation.md).
+All three MCP servers run under `.venv`. `generate_speech` launches `tts_worker.py` with `.venv-tts` so Torch and Chatterbox stay out of the MCP process; `get_audio_metadata` needs no model at all. See [ADR 0004](docs/adr/0004-tts-mcp-subprocess-isolation.md). The media server calls FFmpeg/ffprobe through `media_service.py`; see [ADR 0005](docs/adr/0005-media-service-and-duration-policies.md). `opencode.json` was backed up to `opencode.json.bak-20261118-000343` before the third server was registered.
 
 ## TTS setup — installed, smoke tests passed
 
@@ -324,6 +349,51 @@ Still planned or under evaluation:
 - configurable speaking speed through parameter mapping or post-processing
 - additional Chatterbox tuning knobs (`cfg_weight`, temperature, sampling parameters)
 
+## FFmpeg media service (Phase 1)
+
+FFmpeg and ffprobe 9.0.1 (essentials build) are installed at `C:\ffmpeg\ffmpeg-9.0.1-essentials_build\bin` and available on PATH; this was verified from PowerShell before implementation. Nothing was installed or upgraded for this milestone.
+
+`media_service.py` is a standard-library-only service that owns every FFmpeg/ffprobe subprocess call. `media_server.py` wraps it as the third MCP server. No packages were added to `.venv`, and Torch/Chatterbox remain confined to `.venv-tts`.
+
+### Implemented operations
+
+| Operation | Behavior |
+|---|---|
+| `probe_media` | ffprobe duration, resolution, FPS, video/audio codecs, sample rate, channels and file size; structured `status="error"` for missing or invalid media |
+| `merge_narration` | AAC audio at 192 kb/s, configurable volume, explicit duration handling, temp-file render, ffprobe validation before promotion |
+| `validate_media` | existence, readability, video/audio streams, resolution, frame rate, audio metadata and optional expected duration with tolerance |
+
+### Duration policies
+
+- `trim_audio` — audio is matched to the video length. Longer narration is trimmed to the video; shorter narration is padded with silence. Video is stream-copied, preserving quality.
+- `extend_video` — when narration is longer, the last video frame is frozen with `tpad` until narration ends. This requires libx264 re-encoding (`crf=18`, `preset=medium`). When narration is shorter, neither stream is cut and the remaining gap is reported.
+
+Trims, silence padding, frame freezes and remaining gaps are always returned in `warnings` and timing fields such as `audio_trimmed_s` and `video_extended_s`; narration is never silently truncated.
+
+### Safety and configuration
+
+- Renders go to a hidden `.tmp.mp4` file in the destination folder and are promoted only after validation succeeds.
+- Existing outputs are refused unless the caller passes `overwrite=True`. A second existence check prevents overwriting a file created during rendering.
+- Subprocess timeouts are always set. Override with `MEDIA_FFMPEG_TIMEOUT_S` (default 180 s), `MEDIA_FFPROBE_TIMEOUT_S` (default 30 s), `MEDIA_FFMPEG_BIN` and `MEDIA_FFPROBE_BIN`.
+- Expected media failures return structured results instead of crashing the MCP server.
+
+### Live verification output
+
+```text
+C:\AI-Video-Agent\test-output\first_narrated_video.mp4
+4.25 s / 768x512 / 24 FPS / h264 video / AAC 24 kHz mono audio
+534,698 bytes
+```
+
+Source video `ltxv_00006.mp4` is 4.041667 s; narration `mcp_english_verified.wav` is 4.24 s. `extend_video` froze the final frame for 0.198 s and validation passed with zero errors. A duplicate render without `overwrite=True` was correctly rejected.
+
+### Known limitations
+
+- Validation confirms readable streams and metadata, not perceptual A/V sync or narration content.
+- Large renders occupy a worker thread; queueing and concurrency are not implemented.
+- Only WAV narration input and MP4 output are supported in Phase 1.
+- Music, sound effects, subtitles, transitions and multi-scene rendering are deliberately out of scope.
+
 ## Repository hygiene
 
 Do not commit or upload:
@@ -351,7 +421,7 @@ The project has a local Git repository with no commits and no remote. No remote 
 9. **TTS MCP tools** — completed and verified
 10. **Storyboard and `scenes.json` manifest** — planned
 11. **Scene rendering pipeline** — planned
-12. **Music, SFX, subtitles, FFmpeg render, and validation** — planned
+12. **FFmpeg merge and validation** — completed for Phase 1; music, SFX and subtitles still planned
 
 ## License
 

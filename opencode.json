@@ -20,6 +20,15 @@
         ],
         "cwd": "C:\\AI-Video-Agent",
         "codemode": false
+      },
+      "local-media-agent": {
+        "type": "local",
+        "command": [
+          "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
+          "C:\\AI-Video-Agent\\media_server.py"
+        ],
+        "cwd": "C:\\AI-Video-Agent",
+        "codemode": false
       }
     }
   }
