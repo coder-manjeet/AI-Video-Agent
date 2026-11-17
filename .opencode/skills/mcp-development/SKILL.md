@@ -5,7 +5,7 @@ description: Use when adding, changing, or debugging FastMCP tools in server.py,
 
 # MCP Development
 
-`server.py` defines FastMCP tools over stdio; `opencode.json` registers them. The three existing tools (`comfyui_status`, `create_video`, `check_video_status`) are working — extend, do not replace them.
+`server.py` (`local-video-agent`) and `tts_server.py` (`local-tts-agent`) define FastMCP tools over stdio; `opencode.json` registers both. The video server's three tools (`comfyui_status`, `create_video`, `check_video_status`) are working — extend, do not replace them. The TTS server exposes `generate_speech` and `get_audio_metadata`; generation is delegated to `tts_worker.py` under `.venv-tts` so Torch never loads into an MCP process.
 
 ## Tool design
 - One tool = one action. Async functions, typed arguments, typed `dict` result, JSON-serializable values only.

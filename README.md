@@ -20,7 +20,9 @@ into a validated, YouTube-ready MP4 using local models and services.
 | Chatterbox TTS compatibility audit | Complete |
 | Chatterbox TTS controlled installation | Complete |
 | Chatterbox TTS English/Hindi smoke tests | Complete |
-| Git repository / remote | Not initialized |
+| Chatterbox TTS service | Complete |
+| TTS MCP integration | Verified end to end |
+| Git repository / remote | Local repository initialized; no commits or remote |
 
 This repository currently contains a small, working MCP integration. The broader service architecture is being introduced gradually, without breaking that integration.
 
@@ -58,18 +60,28 @@ C:\AI-Video-Agent\
 ├── comfyui_client.py               # ComfyUI HTTP client and workflow patches
 ├── ltx_image_to_video_api.json     # tested LTX image-to-video API workflow
 ├── opencode.json                   # OpenCode MCP server configuration
-├── server.py                       # FastMCP tool definitions
+├── server.py                       # FastMCP tools for local-video-agent
+├── tts_service.py                  # provider-independent TTS service
+├── tts_server.py                   # FastMCP tools for local-tts-agent
+├── tts_worker.py                   # .venv-tts generation worker
+├── tests\                          # unit and integration tests
+├── docs\                           # project status and decisions
 ├── .gitignore                      # repository hygiene
 └── README.md                       # this document
 ```
 
 ### Existing MCP tools
 
-Defined in `server.py`:
+Defined in `server.py` (`local-video-agent`):
 
 - `comfyui_status()` — checks ComfyUI system stats
 - `create_video(image_path, prompt)` — uploads an image and submits the LTX workflow
 - `check_video_status(prompt_id)` — retrieves job status and output details
+
+Defined in `tts_server.py` (`local-tts-agent`):
+
+- `generate_speech(text, output_path, language="en", voice="chatterbox-default-narrator", reference_wav=None, expressiveness=None, overwrite=False)` — generates a 24 kHz WAV; existing files are refused unless `overwrite=True`
+- `get_audio_metadata(wav_path)` — returns path, duration, sample rate, sample count, peak and RMS without loading a model
 
 ## Target architecture
 
@@ -201,7 +213,7 @@ Important: this workflow has already been tested successfully. Do not replace it
 
 ## MCP configuration
 
-`opencode.json` registers the local server:
+`opencode.json` registers two local servers:
 
 ```json
 {
@@ -213,6 +225,15 @@ Important: this workflow has already been tested successfully. Do not replace it
         "command": [
           "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
           "C:\\AI-Video-Agent\\server.py"
+        ],
+        "cwd": "C:\\AI-Video-Agent",
+        "codemode": false
+      },
+      "local-tts-agent": {
+        "type": "local",
+        "command": [
+          "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
+          "C:\\AI-Video-Agent\\tts_server.py"
         ],
         "cwd": "C:\\AI-Video-Agent",
         "codemode": false
@@ -228,11 +249,15 @@ Available tools:
 comfyui_status
 create_video
 check_video_status
+generate_speech
+get_audio_metadata
 ```
+
+Both MCP servers run under `.venv`. `generate_speech` launches `tts_worker.py` with `.venv-tts` so Torch and Chatterbox stay out of the MCP process; `get_audio_metadata` needs no model at all. See [ADR 0004](docs/adr/0004-tts-mcp-subprocess-isolation.md).
 
 ## TTS setup — installed, smoke tests passed
 
-Chatterbox Multilingual TTS is installed in `.venv-tts`. Short English and Hindi CUDA inference both passed using the cached model. The next milestone is the TTS core service.
+Chatterbox Multilingual TTS is installed in `.venv-tts`. Short English and Hindi CUDA inference both passed using the cached model. `tts_service.py` wraps the official API, and two MCP tools expose generation and metadata reading. English (`en`) is the production target; Hindi (`hi`) is experimental and its output quality still needs evaluation.
 
 ### Official sources
 
@@ -282,17 +307,22 @@ WAV output uses `soundfile.write(...)` rather than `torchaudio.save(...)`, becau
 
 Before any GPU TTS stage, check ComfyUI VRAM: an empty render queue does not mean VRAM is free. If `GET /system_stats` shows low free VRAM, call `POST /free` with `{"unload_models":true,"free_memory":true}` and verify availability before starting TTS. ComfyUI reloads its models on the next render.
 
-### Planned TTS capabilities
+### TTS capabilities
 
-- English narration
-- Hindi narration
-- practical Hinglish evaluation
-- configurable reference voice
-- configurable expressiveness
+Available now:
+
+- English (`en`) narration; experimental `hi` and `hinglish` routing through `resolve_language()`
+- WAV output at 24 kHz with duration, sample count, peak and RMS metadata
+- default narrator voice or a licensed reference WAV via `audio_prompt_path`
+- `expressiveness` mapped to Chatterbox `exaggeration`
+- MCP tools for generation and model-free metadata reading
+- VRAM check/free through ComfyUI before each GPU stage
+
+Still planned or under evaluation:
+
+- practical Hinglish and Hindi quality evaluation
 - configurable speaking speed through parameter mapping or post-processing
-- WAV output
-- duration and metadata extraction
-- eventual MCP tools
+- additional Chatterbox tuning knobs (`cfg_weight`, temperature, sampling parameters)
 
 ## Repository hygiene
 
@@ -306,7 +336,7 @@ Do not commit or upload:
 
 `.gitignore` is configured for these exclusions while preserving source code, workflow JSON, documentation, and dependency manifests.
 
-The project is not yet a Git repository and has no remote. No remote will be added and nothing will be pushed until the GitHub repository URL and visibility are confirmed.
+The project has a local Git repository with no commits and no remote. No remote will be added and nothing will be pushed until the GitHub repository URL and visibility are confirmed.
 
 ## Development roadmap
 
@@ -315,10 +345,10 @@ The project is not yet a Git repository and has no remote. No remote will be add
 3. **Chatterbox compatibility probe** — completed
 4. **Controlled Chatterbox installation** — completed
 5. **English and Hindi smoke tests** — completed
-6. **TTS core service with WAV output and metadata** — planned
-7. **Hinglish evaluation** — planned
+6. **TTS core service with WAV output and metadata** — completed
+7. **Hinglish and Hindi quality evaluation** — pending
 8. **Audio utilities for duration, normalization, and time-stretch** — planned
-9. **TTS MCP tools** — planned
+9. **TTS MCP tools** — completed and verified
 10. **Storyboard and `scenes.json` manifest** — planned
 11. **Scene rendering pipeline** — planned
 12. **Music, SFX, subtitles, FFmpeg render, and validation** — planned
