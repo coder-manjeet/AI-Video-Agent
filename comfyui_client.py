@@ -1,6 +1,10 @@
 
 import json
+import logging
+import uuid
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -8,6 +12,7 @@ COMFYUI_URL = "http://127.0.0.1:8000"
 
 PROJECT_DIR = Path(__file__).resolve().parent
 WORKFLOW_PATH = PROJECT_DIR / "ltx_image_to_video_api.json"
+logger = logging.getLogger(__name__)
 
 
 def load_workflow() -> dict:
@@ -111,4 +116,75 @@ async def get_video_result(prompt_id: str) -> dict:
         "status": "completed",
         "video": None,
         "message": "No video output found.",
-    }
+    }
+
+
+def load_workflow_file(path: str | Path) -> dict[str, Any]:
+    """Load any API-format workflow file without modifying it."""
+    workflow_path = Path(path).expanduser().resolve()
+    if not workflow_path.is_file():
+        raise FileNotFoundError(f"Workflow not found: {workflow_path}")
+    with workflow_path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Workflow must be a JSON object: {workflow_path}")
+    return payload
+
+
+async def submit_workflow(workflow: Mapping[str, Any]) -> str:
+    """Submit an API-format workflow and return its ComfyUI prompt ID."""
+    if not workflow:
+        raise ValueError("workflow must not be empty")
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            f"{COMFYUI_URL}/prompt",
+            json={"prompt": dict(workflow)},
+        )
+        response.raise_for_status()
+        return response.json()["prompt_id"]
+
+
+async def get_prompt_history(prompt_id: str) -> dict[str, Any]:
+    """Read the ComfyUI history entry for a prompt ID."""
+    if not prompt_id or not isinstance(prompt_id, str):
+        raise ValueError("prompt_id must be a non-empty string")
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(f"{COMFYUI_URL}/history/{prompt_id}")
+        response.raise_for_status()
+        payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+async def download_output_image(
+    image: Mapping[str, Any],
+    destination: str | Path,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Download a ComfyUI output image to *destination* without overwriting."""
+    filename = image.get("filename")
+    if not isinstance(filename, str) or not filename:
+        raise ValueError("image entry has no filename")
+    target = Path(destination).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not overwrite:
+        raise FileExistsError(f"Output image already exists: {target}")
+    params = {
+        "filename": filename,
+        "subfolder": image.get("subfolder", ""),
+        "type": image.get("type", "output"),
+    }
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(f"{COMFYUI_URL}/view", params=params)
+        response.raise_for_status()
+        content = response.content
+
+    temp = target.with_name(f".{target.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        temp.write_bytes(content)
+        temp.replace(target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    logger.info("Downloaded ComfyUI image to %s", target)
+    return target

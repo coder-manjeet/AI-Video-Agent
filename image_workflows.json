@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "default_workflow": "z_image_turbo_text_to_image",
+  "workflows": {
+    "z_image_turbo_text_to_image": {
+      "name": "Z-Image Turbo Text to Image",
+      "workflow_file": "z_image_turbo_text_to_image_api.json",
+      "description": "Verified API-format Z-Image Turbo text-to-image workflow using the Lumina2 text encoder configuration.",
+      "expected_classes": {
+        "1": "UNETLoader",
+        "2": "CLIPLoader",
+        "3": "VAELoader",
+        "4": "CLIPTextEncode",
+        "5": "ConditioningZeroOut",
+        "6": "EmptySD3LatentImage",
+        "7": "ModelSamplingAuraFlow",
+        "8": "KSampler",
+        "9": "VAEDecode",
+        "10": "SaveImage"
+      },
+      "required_inputs": {
+        "1.unet_name": "z_image_turbo_bf16.safetensors",
+        "2.clip_name": "qwen_3_4b.safetensors",
+        "2.type": "lumina2",
+        "3.vae_name": "ae.safetensors"
+      },
+      "nodes": {
+        "positive_prompt": {
+          "node": "4",
+          "input": "text",
+          "expected_class": "CLIPTextEncode"
+        },
+        "negative_prompt": null,
+        "width": {
+          "node": "6",
+          "input": "width",
+          "expected_class": "EmptySD3LatentImage"
+        },
+        "height": {
+          "node": "6",
+          "input": "height",
+          "expected_class": "EmptySD3LatentImage"
+        },
+        "seed": {
+          "node": "8",
+          "input": "seed",
+          "expected_class": "KSampler"
+        },
+        "steps": {
+          "node": "8",
+          "input": "steps",
+          "expected_class": "KSampler"
+        },
+        "cfg": {
+          "node": "8",
+          "input": "cfg",
+          "expected_class": "KSampler"
+        },
+        "filename_prefix": {
+          "node": "10",
+          "input": "filename_prefix",
+          "expected_class": "SaveImage"
+        }
+      },
+      "output": {
+        "node": "10",
+        "images_key": "images",
+        "expected_class": "SaveImage"
+      },
+      "capabilities": {
+        "negative_prompt": false,
+        "width": true,
+        "height": true,
+        "seed": true,
+        "steps": true,
+        "cfg": true,
+        "character_references": false,
+        "visual_style": false,
+        "color_palette": false,
+        "character_appearance": false
+      },
+      "defaults": {
+        "width": 768,
+        "height": 512,
+        "seed": 0,
+        "steps": 8,
+        "cfg": 1.0
+      },
+      "limits": {
+        "min_dimension": 64,
+        "max_dimension": 2048,
+        "min_steps": 1,
+        "max_steps": 50
+      },
+      "notes": [
+        "Negative prompting is not supported: the workflow uses ConditioningZeroOut; any supplied negative prompt is ignored with a warning.",
+        "Character references, visual style, color palette and character appearance are recorded as metadata only and do not condition the generated image.",
+        "All generation jobs must be submitted sequentially to protect the shared 16 GB GPU."
+      ]
+    }
+  }
+}

@@ -1,16 +1,60 @@
 # Project Status
 
-Last updated: 2026-11-18
+Last updated: 2026-11-20
 
 ## Current milestone
 
-Milestone 7 — Local FFmpeg Media Service, Phase 1 — is complete and verified end to end.
+Milestone 2B — Character Identity and Visual Consistency Foundation — is complete and verified.
+
+Projects now have a structured `project.json`, a scene manifest at `script/scenes.json`, dedicated project/scene/character services, a validation layer, a sequential timeline planner, an independent scene image-generation service, and a reusable character identity + visual prompt composition foundation. All business logic lives in MCP-independent modules. The three existing MCP servers, their configurations, `opencode.json`, `ltx_image_to_video_api.json`, `z_image_turbo_text_to_image_api.json`, TTS, FFmpeg behaviour, existing tests and previously generated media are unchanged. No video generation, final rendering or UI was added.
+
+The complete test suite is **201 passed** (167 previous + 34 new); ruff and mypy pass.
+
+### Milestone 2B work
+
+- Added `character_models.py`: typed `Character`, `VisualIdentity` and `CharacterSceneOverride` dataclasses. All optional fields are non-forced; unknown JSON keys survive round-trips in `extra`.
+- Added `character_service.py`: a project-level character registry at `assets/characters/characters.json` with atomic writes. Supports create/load/update/delete/list/get, reference-image registration (content-addressed copies, idempotent), reference retrieval, validation and missing-character detection. Deleting character metadata **never** deletes reference image files.
+- Extended `project_models.py`: `Project.visual_identity` (typed, optional) plus `Scene.character_ids`, `Scene.character_overrides` and `Scene.visual_identity_overrides`. Legacy `character_references` image-path strings are untouched. Older manifests remain valid.
+- Extended `manifest_validation.py`: `validate_character_manifest` with structured codes for schema, IDs, names, text, references and timestamps; project `visual_identity` validation; scene character/override validation. Optional manifests mean existing projects are unaffected.
+- Extended `project_service.py`: `update_visual_identity(...)` persists, merges and clears project-wide visual identity in `project.json` with validation and atomic writes.
+- Added `visual_prompt_builder.py`: a pure, deterministic service that composes project identity, character identities, scene description, character actions/expressions, the original image prompt and negative prompts. It de-duplicates repeated fragments, lets scene overrides replace base appearance/clothing, supports multiple or zero characters, localises section labels for `en/es/fr/de/hi/pt/zh` (English fallback), keeps original prompts available and returns structured debug sections.
+- Extended `scene_image_service.py`: opt-in `compose_prompt=True` builds a composed prompt via the builder; the default path is unchanged. Composition debug info is stored in job metadata, and consistency inputs are preserved in `job.options` so retries reuse the same composed prompt without recomposing.
+- Surveyed live ComfyUI 0.46.0 (1,596 nodes) and all local model directories. No reference-image conditioning is usable: IP-Adapter core nodes/models, ControlNet models, CLIP-Vision, PhotoMaker, InsightFace and style-model weights are absent (empty combos/directories). Generic image-to-image nodes exist but the verified Z-Image workflow has no image→sampler path. **Prompt composition improves intent, not guaranteed identity preservation.**
+- Added 34 mocked tests across four new modules; no GPU, ComfyUI server, live network or new dependencies are required.
+- Recorded the architecture decision in [ADR 0008](adr/0008-character-visual-consistency.md).
+
+### Milestone 2A work
+
+- Added `z_image_turbo_text_to_image_api.json`: a new 10-node API-format Z-Image Turbo workflow using `UNETLoader` (`z_image_turbo_bf16.safetensors`), `CLIPLoader` with **`lumina2`** (`qwen_3_4b.safetensors`), `VAELoader` (`ae.safetensors`), `EmptySD3LatentImage`, `ModelSamplingAuraFlow`, `KSampler`, `VAEDecode` and `SaveImage`. The existing LTX workflow was not touched.
+- Verified the workflow offline against live ComfyUI `/object_info` (0 errors, all combo values and links valid), then ran **one** controlled 512×512 GPU job (`42ab02e1-a48e-4139-85e7-9bf154fa64e7`) that completed with `success`; the PNG was downloaded and verified as a readable 512×512 image (236,506 bytes).
+- Added generic, additive helpers to `comfyui_client.py` (`load_workflow_file`, `submit_workflow`, `get_prompt_history`, `download_output_image`) with overwrite protection. Existing ComfyUI functions were not modified.
+- Added `image_workflows.json`: a declarative registry with node bindings, expected classes/model values, capabilities, defaults, limits and notes. Node IDs are not hardcoded in the service.
+- Added `workflow_adapter.py`: registry loading, offline compatibility validation (catches the incorrect `sd3` CLIP configuration), safe patching and history output extraction.
+- Added `scene_image_service.py`: sequential generation with an `asyncio.Lock`, in-memory job registry, submission retry, status polling, timeout handling, PNG/dimension verification, unique versioned filenames (`scene-001-opening.png`, `scene-001-opening-v2.png`), and a single scene-manifest write **only after** the image is verified. Regenerating one scene never overwrites another scene's image or changes its fields.
+- Added 25 mocked unit tests (`tests/test_workflow_adapter.py`, `tests/test_scene_image_service.py`); no GPU, ComfyUI server or live network is required.
+- Recorded the architecture decision in [ADR 0007](adr/0007-scene-image-generation.md).
+
+### Milestone 1 work
+
+- Added `project_models.py`: typed, extensible `Project`, `ProjectSettings` and `Scene` dataclasses with JSON round-trips. Unknown manifest keys are preserved in `extra`.
+- Added `project_paths.py`: identifier validation, project-root traversal protection, timestamp/language/aspect-ratio helpers and atomic JSON writes via a same-directory temp file.
+- Added `project_service.py`: project creation with the full directory structure, load, list and metadata updates; existing projects are never overwritten.
+- Added `scene_service.py`: scene add/update/delete/reorder/move, sequential renumbering, status updates, safe asset-path registration and manifest load/save. Deleting a scene never deletes generated assets.
+- Added `manifest_validation.py`: structured errors and warnings for project metadata, scene order/status/durations and referenced assets. Missing generated assets are warnings, so draft scenes stay valid; escaping paths are errors.
+- Added `timeline_planner.py`: `Decimal`-based sequential video-scene planning with editor-ready scene cards, track scaffolding and optional persistence of `timeline_start`/`timeline_end`.
+- Added 79 unit tests across five new test modules; all use `tmp_path` and do not write to `projects/` or `output/`.
+- Recorded the architecture decision in [ADR 0006](adr/0006-scene-project-foundation.md).
+- Deliberately deferred: MCP tools for the new services, multi-track audio planning, scene generation, final assembly and any UI.
+
+## Completed work (previous milestone)
+
+Milestone 7 — Local FFmpeg Media Service, Phase 1 — was completed and verified end to end.
 
 `media_service.py` provides reusable `probe_media`, `merge_narration` and `validate_media` operations using FFmpeg/ffprobe. A third MCP server, `local-media-agent`, exposes them over stdio. The original `local-video-agent` and `local-tts-agent` servers, their business logic, and the tested LTX workflow are unchanged. All three servers are connected simultaneously under `.venv`.
 
 A live render combined the existing `ltxv_00006.mp4` clip with the verified English narration WAV into a new, validated MP4 using `extend_video` so no narration was cut off.
 
-## Completed work
+## Previous milestone work
 
 - Audited the existing project, Git state, MCP integration, LTX workflow and TTS service before implementation.
 - Verified FFmpeg and ffprobe are on PATH: `C:\ffmpeg\ffmpeg-9.0.1-essentials_build\bin`, version `9.0.1-essentials_build`. No installation was performed.
@@ -47,7 +91,9 @@ A live render combined the existing `ltxv_00006.mp4` clip with the verified Engl
 | English / Hindi GPU inference (prior milestone) | Passed; quality review still pending for Hindi |
 | `python -m ruff check .` | Passed |
 | `python -m mypy server.py comfyui_client.py tts_service.py tts_server.py tts_worker.py media_service.py media_server.py` | Passed |
-| `python -m pytest -q` | 63 passed |
+| `python -m pytest -q` | 201 passed (167 previous + 34 new) |
+| New modules: ruff / mypy | Passed (18 source files) |
+| Scene project smoke checks | Directory scaffold, manifest round-trip, traversal rejection and timeline recalculation covered by unit tests |
 | `opencode mcp list` | `local-media-agent`, `local-tts-agent`, `local-video-agent` all connected |
 | MCP `list_tools` (media) | `probe_media`, `merge_narration`, `validate_media` |
 | MCP `probe_media` on source video / narration | Correct durations, codecs and stream metadata |
@@ -83,7 +129,13 @@ validation duration delta: 0.01 s (within 0.5 s tolerance)
 - Hinglish has no official Chatterbox code; its script heuristic routes to `hi` or `en` but remains untested.
 - Perceptual A/V sync and narration intelligibility are not automatically assessed; validation is stream/metadata level only.
 - Large renders are synchronous per request; queueing and concurrency are future work.
-- The Git repository exists locally with no commits or remote.
+- The scene foundation and image-generation service have no MCP tools and no UI yet; callers use the Python services directly.
+- Final video assembly, multi-track audio, subtitles and per-scene video generation are still future milestones.
+- The Z-Image Turbo workflow does not support negative prompts or reference-image conditioning; supplied values are recorded as metadata and reported as warnings rather than silently applied.
+- Real character identity preservation needs conditioning models/custom nodes that are not installed locally; Milestone 2B provides prompt-level consistency only and makes no guarantee. Enabling reference conditioning requires approval before installing models or nodes, plus a new verified workflow.
+- Character registry and visual identity have no MCP tools and no UI yet; callers use the Python services directly.
+- ComfyUI retains loaded models between jobs; sequential generation protects VRAM but does not unload models automatically.
+- The Git repository has local commits and an `origin` remote; no commits were made in Milestones 1, 2A or 2B.
 
 ## Environment rules
 
@@ -98,4 +150,4 @@ validation duration delta: 0.01 s (within 0.5 s tolerance)
 
 ## Next action
 
-Continue with the scene-based pipeline (`scenes.json`) and, when needed, add music, SFX and subtitles on top of the validated media service. Do not start multi-scene rendering or subtitle work as part of this milestone. The Chatterbox model weights are cached; no further Hugging Face download is needed.
+Milestone 2B is complete. Wait for user confirmation before starting the next milestone. Candidate work includes real reference-image conditioning (requires model/custom-node approval and a new verified workflow), MCP tools for the new services, per-scene video generation and final assembly without changing the three existing MCP servers. Do not start multi-scene video rendering, subtitles or dependency installs without that confirmation. The Chatterbox model weights are cached; no further Hugging Face download is needed.
