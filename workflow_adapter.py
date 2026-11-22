@@ -1,9 +1,9 @@
-"""Configuration-driven adapter for ComfyUI image-generation workflows.
+"""Configuration-driven adapter for ComfyUI generation workflows.
 
-Node IDs live in ``image_workflows.json`` instead of the generation service so
-workflows can be swapped without touching business logic.  This module performs
-pure, offline compatibility checks and prompt patching; it never talks to
-ComfyUI itself.
+Node IDs live in JSON registry files instead of the generation services so
+workflows can be swapped without touching business logic.  The same bindings
+support text-to-image and image-to-video workflows; this module performs pure,
+offline compatibility checks and patching and never talks to ComfyUI itself.
 """
 
 from __future__ import annotations
@@ -47,11 +47,17 @@ class NodeBinding:
 
 @dataclass(frozen=True)
 class OutputBinding:
-    """Where to find the generated image in a ComfyUI history entry."""
+    """Where to find a generated asset in a ComfyUI history entry.
+
+    ``images_key`` names the history output list (``images`` for SaveImage,
+    ``gifs`` for VHS_VideoCombine).  ``check_input`` is false for output nodes
+    whose generated asset list is not also a node input.
+    """
 
     node: str
     images_key: str = "images"
     expected_class: str | None = None
+    check_input: bool = True
 
 
 @dataclass(frozen=True)
@@ -65,6 +71,8 @@ class GenerationOptions:
     seed: int | None = None
     steps: int | None = None
     cfg: float | None = None
+    frames: int | None = None
+    fps: float | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +98,10 @@ class WorkflowSpec:
     defaults: dict[str, Any]
     limits: dict[str, int]
     notes: tuple[str, ...]
+    image: NodeBinding | None = None
+    frames: NodeBinding | None = None
+    fps: tuple[NodeBinding, ...] = ()
+    model_inputs: tuple[str, ...] = ()
 
 
 class WorkflowRegistry:
@@ -158,6 +170,32 @@ def _binding(raw: Any, label: str) -> NodeBinding | None:
     return NodeBinding(node, input_name, expected_class)
 
 
+def _bindings(raw: Any, label: str) -> tuple[NodeBinding, ...]:
+    """Parse one binding or an array of bindings (e.g. duplicated FPS inputs)."""
+    if raw is None:
+        return ()
+    candidates = raw if isinstance(raw, list) else [raw]
+    parsed: list[NodeBinding] = []
+    for index, candidate in enumerate(candidates):
+        parsed_item = _binding(candidate, f"{label}[{index}]")
+        if parsed_item is not None:
+            parsed.append(parsed_item)
+    return tuple(parsed)
+
+
+def _model_inputs(raw: Any, name: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or not all(
+        isinstance(item, str) and item.count(".") == 1 and all(item.split("."))
+        for item in raw
+    ):
+        raise WorkflowConfigError(
+            f"workflows.{name}.model_inputs must be a list of 'node.input' strings"
+        )
+    return tuple(raw)
+
+
 def _parse_spec(name: str, raw: Any) -> WorkflowSpec:
     if not isinstance(raw, Mapping):
         raise WorkflowConfigError(f"workflows.{name} must be an object")
@@ -193,6 +231,11 @@ def _parse_spec(name: str, raw: Any) -> WorkflowSpec:
     output_node = output_raw.get("node")
     images_key = output_raw.get("images_key", "images")
     output_class = output_raw.get("expected_class")
+    check_input = output_raw.get("check_input", True)
+    if not isinstance(check_input, bool):
+        raise WorkflowConfigError(
+            f"workflows.{name}.output.check_input must be a boolean"
+        )
     if not isinstance(output_node, str) or not output_node:
         raise WorkflowConfigError(f"workflows.{name}.output.node is required")
     if not isinstance(images_key, str) or not images_key:
@@ -225,11 +268,15 @@ def _parse_spec(name: str, raw: Any) -> WorkflowSpec:
         filename_prefix=_binding(
             nodes.get("filename_prefix"), "filename_prefix"
         ),
-        output=OutputBinding(output_node, images_key, output_class),
+        output=OutputBinding(output_node, images_key, output_class, check_input),
         capabilities=dict(capabilities),
         defaults=dict(defaults),
         limits=dict(limits),
         notes=tuple(notes),
+        image=_binding(nodes.get("image"), "image"),
+        frames=_binding(nodes.get("frames"), "frames"),
+        fps=_bindings(nodes.get("fps"), "fps"),
+        model_inputs=_model_inputs(raw.get("model_inputs"), name),
     )
 
 
@@ -311,13 +358,16 @@ def validate_workflow(
     bindings: list[tuple[str, NodeBinding | None]] = [
         ("positive_prompt", spec.positive_prompt),
         ("negative_prompt", spec.negative_prompt),
+        ("image", spec.image),
         ("width", spec.width),
         ("height", spec.height),
+        ("frames", spec.frames),
         ("seed", spec.seed),
         ("steps", spec.steps),
         ("cfg", spec.cfg),
         ("filename_prefix", spec.filename_prefix),
     ]
+    bindings.extend((f"fps[{index}]", binding) for index, binding in enumerate(spec.fps))
     for label, binding in bindings:
         if binding is None:
             continue
@@ -337,6 +387,16 @@ def validate_workflow(
         if not isinstance(inputs, Mapping) or binding.input not in inputs:
             errors.append(f"{label}: input {binding.node}.{binding.input} is missing")
 
+    for path in spec.model_inputs:
+        node_id, _, input_name = path.rpartition(".")
+        node = workflow.get(node_id)
+        if node is None:
+            errors.append(f"model input {path}: missing node {node_id}")
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, Mapping) or input_name not in inputs:
+            errors.append(f"model input {path}: input is missing")
+
     output_node = workflow.get(spec.output.node)
     if output_node is None:
         errors.append(f"output: missing node {spec.output.node}")
@@ -350,11 +410,12 @@ def validate_workflow(
                 f"{output_node.get('class_type')!r}, "
                 f"expected {spec.output.expected_class!r}"
             )
-        inputs = output_node.get("inputs")
-        if not isinstance(inputs, Mapping) or spec.output.images_key not in inputs:
-            errors.append(
-                f"output: input {spec.output.node}.{spec.output.images_key} is missing"
-            )
+        if spec.output.check_input:
+            inputs = output_node.get("inputs")
+            if not isinstance(inputs, Mapping) or spec.output.images_key not in inputs:
+                errors.append(
+                    f"output: input {spec.output.node}.{spec.output.images_key} is missing"
+                )
 
     return errors
 
@@ -382,7 +443,7 @@ def unsupported_options(
             f"Workflow {spec.name!r} does not support negative prompts; "
             "the supplied negative prompt was ignored."
         )
-    for label in ("width", "height", "seed", "steps", "cfg"):
+    for label in ("width", "height", "frames", "fps", "seed", "steps", "cfg"):
         value = getattr(options, label)
         if value is not None and not spec.capabilities.get(label, False):
             warnings.append(
@@ -398,6 +459,7 @@ def patch_workflow(
     options: GenerationOptions,
     *,
     filename_prefix: str | None = None,
+    image_name: str | None = None,
 ) -> dict[str, Any]:
     """Return a fresh workflow copy with generation options applied."""
     errors = validate_workflow(spec, workflow)
@@ -407,23 +469,29 @@ def patch_workflow(
         )
     if not isinstance(options.positive_prompt, str) or not options.positive_prompt:
         raise ValueError("positive_prompt must be a non-empty string")
+    if image_name is not None and spec.image is None:
+        raise WorkflowValidationError(
+            f"Workflow {spec.name!r} has no image input binding"
+        )
 
     patched = copy.deepcopy(dict(workflow))
 
     def set_input(binding: NodeBinding | None, value: Any) -> None:
-        if binding is not None:
+        if binding is not None and value is not None:
             patched[binding.node]["inputs"][binding.input] = value
 
     set_input(spec.positive_prompt, options.positive_prompt)
-    if spec.negative_prompt is not None and options.negative_prompt is not None:
-        set_input(spec.negative_prompt, options.negative_prompt)
+    set_input(spec.negative_prompt, options.negative_prompt)
+    set_input(spec.image, image_name)
     set_input(spec.width, options.width)
     set_input(spec.height, options.height)
+    set_input(spec.frames, options.frames)
+    for binding in spec.fps:
+        set_input(binding, options.fps)
     set_input(spec.seed, options.seed)
     set_input(spec.steps, options.steps)
     set_input(spec.cfg, options.cfg)
-    if filename_prefix is not None:
-        set_input(spec.filename_prefix, filename_prefix)
+    set_input(spec.filename_prefix, filename_prefix)
     return patched
 
 
@@ -442,10 +510,10 @@ def job_status(history: Mapping[str, Any], prompt_id: str) -> str:
     return "running"
 
 
-def extract_output_image(
+def extract_output_entry(
     spec: WorkflowSpec, history: Mapping[str, Any], prompt_id: str
 ) -> dict[str, Any] | None:
-    """Return the generated image entry, or None while the job is unfinished."""
+    """Return a generated output entry (image or video) when the job succeeded."""
     status = job_status(history, prompt_id)
     if status == "pending" or status == "running":
         return None
@@ -473,3 +541,7 @@ def extract_output_image(
                 if isinstance(image, Mapping) and image.get("filename"):
                     return dict(image)
     return None
+
+
+# Backwards-compatible name used by the image-generation service.
+extract_output_image = extract_output_entry

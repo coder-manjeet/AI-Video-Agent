@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "default_workflow": "ltx_image_to_video",
+  "workflows": {
+    "ltx_image_to_video": {
+      "name": "LTX Image to Video",
+      "workflow_file": "ltx_image_to_video_api.json",
+      "description": "Verified API-format LTX image-to-video workflow. The source workflow file is never modified; jobs receive a fresh deep copy.",
+      "expected_classes": {
+        "6": "CLIPTextEncode",
+        "7": "CLIPTextEncode",
+        "8": "VAEDecode",
+        "38": "CLIPLoader",
+        "44": "CheckpointLoaderSimple",
+        "69": "LTXVConditioning",
+        "78": "LoadImage",
+        "82": "LTXVPreprocess",
+        "95": "LTXVImgToVideo",
+        "97": "KSamplerSelect",
+        "98": "FloatToSigmas",
+        "99": "CFGGuider",
+        "100": "StringToFloatList",
+        "101": "SamplerCustomAdvanced",
+        "102": "RandomNoise",
+        "103": "VHS_VideoCombine"
+      },
+      "required_inputs": {
+        "38.clip_name": "t5xxl_fp8_e4m3fn.safetensors",
+        "38.type": "ltxv",
+        "44.ckpt_name": "ltxv-2b-0.9.6-distilled-04-25.safetensors",
+        "82.img_compression": 38,
+        "95.width": 768,
+        "95.height": 512,
+        "95.length": 97,
+        "95.batch_size": 1,
+        "97.sampler_name": "euler_ancestral",
+        "99.cfg": 1,
+        "103.format": "video/h264-mp4",
+        "103.pix_fmt": "yuv420p"
+      },
+      "nodes": {
+        "positive_prompt": {
+          "node": "6",
+          "input": "text",
+          "expected_class": "CLIPTextEncode"
+        },
+        "negative_prompt": {
+          "node": "7",
+          "input": "text",
+          "expected_class": "CLIPTextEncode"
+        },
+        "image": {
+          "node": "78",
+          "input": "image",
+          "expected_class": "LoadImage"
+        },
+        "width": {
+          "node": "95",
+          "input": "width",
+          "expected_class": "LTXVImgToVideo"
+        },
+        "height": {
+          "node": "95",
+          "input": "height",
+          "expected_class": "LTXVImgToVideo"
+        },
+        "frames": {
+          "node": "95",
+          "input": "length",
+          "expected_class": "LTXVImgToVideo"
+        },
+        "fps": [
+          {
+            "node": "69",
+            "input": "frame_rate",
+            "expected_class": "LTXVConditioning"
+          },
+          {
+            "node": "103",
+            "input": "frame_rate",
+            "expected_class": "VHS_VideoCombine"
+          }
+        ],
+        "seed": {
+          "node": "102",
+          "input": "noise_seed",
+          "expected_class": "RandomNoise"
+        },
+        "steps": null,
+        "cfg": null,
+        "filename_prefix": {
+          "node": "103",
+          "input": "filename_prefix",
+          "expected_class": "VHS_VideoCombine"
+        }
+      },
+      "output": {
+        "node": "103",
+        "images_key": "gifs",
+        "expected_class": "VHS_VideoCombine",
+        "check_input": false
+      },
+      "model_inputs": [
+        "38.clip_name",
+        "44.ckpt_name"
+      ],
+      "capabilities": {
+        "negative_prompt": true,
+        "width": true,
+        "height": true,
+        "frames": true,
+        "fps": true,
+        "seed": true,
+        "steps": false,
+        "cfg": false,
+        "audio": false,
+        "duration": false
+      },
+      "defaults": {
+        "width": 768,
+        "height": 512,
+        "frames": 97,
+        "fps": 24,
+        "seed": 45
+      },
+      "limits": {
+        "min_dimension": 64,
+        "max_dimension": 2048,
+        "min_frames": 1,
+        "max_frames": 1000,
+        "min_fps": 1,
+        "max_fps": 120
+      },
+      "notes": [
+        "Verified defaults: 768x512, 97 frames at 24 FPS, approximately 4.04 seconds. Changing frames or FPS is exposed but not separately verified.",
+        "The scene's planned duration is never used to infer generated length; actual duration is measured with ffprobe after download.",
+        "Scene images are uploaded to ComfyUI and referenced through the LoadImage node; no local workflow file is changed.",
+        "Generation is sequential because GPU memory is shared with TTS and other ComfyUI jobs."
+      ]
+    }
+  }
+}

@@ -26,9 +26,12 @@ into a validated, YouTube-ready MP4 using local models and services.
 | FFmpeg media service (Phase 1) | Complete |
 | Media MCP integration | Connected — three independent servers registered |
 | Live narrated MP4 | Verified — `test-output/first_narrated_video.mp4` |
-| Git repository / remote | Local repository initialized; no commits or remote |
+| Scene project/scene/character services | Complete — Python APIs, no MCP tools yet |
+| Scene image generation | Complete — mocked tests plus one live GPU job |
+| Scene animation | Complete — mocked tests plus one live GPU job |
+| Git repository / remote | Local repository with `origin` configured; no push performed |
 
-This repository currently contains a small, working MCP integration. The broader service architecture is being introduced gradually, without breaking that integration.
+The repository contains a working three-server MCP integration plus MCP-independent scene project, image-generation and animation services. The broader architecture is being introduced gradually without breaking that integration.
 
 ## Development workflow
 
@@ -70,6 +73,20 @@ C:\AI-Video-Agent\
 ├── tts_worker.py                   # .venv-tts generation worker
 ├── media_service.py                # FFmpeg/ffprobe operations (no MCP imports)
 ├── media_server.py                 # FastMCP tools for local-media-agent
+├── project_models.py               # typed project and scene manifests
+├── project_paths.py                # path safety and atomic JSON writes
+├── project_service.py              # project lifecycle and metadata
+├── scene_service.py                # scene manifest operations
+├── manifest_validation.py          # structured project/scene validation
+├── timeline_planner.py             # sequential timeline planning
+├── character_models.py             # character identity data models
+├── character_service.py            # project-level character registry
+├── visual_prompt_builder.py        # deterministic prompt composition
+├── image_workflows.json            # scene image workflow registry
+├── video_workflows.json            # scene animation workflow registry
+├── workflow_adapter.py             # declarative workflow validation and patching
+├── scene_image_service.py          # sequential scene image generation
+├── scene_video_service.py          # sequential scene animation generation
 ├── tests\                          # unit and integration tests
 ├── docs\                           # project status and decisions
 ├── .gitignore                      # repository hygiene
@@ -94,6 +111,18 @@ Defined in `media_server.py` (`local-media-agent`):
 - `probe_media(path, timeout_s=None)` — ffprobe stream metadata with structured errors for missing/invalid files
 - `merge_narration(video_path, narration_path, output_path, volume=1.0, duration_policy="trim_audio", overwrite=False, timeout_s=None)` — renders a validated MP4 and reports every duration adjustment
 - `validate_media(path, expected_duration_s=None, duration_tolerance_s=0.5, timeout_s=None)` — structured existence/readability, stream and duration checks
+
+## Scene services (Python APIs)
+
+The scene services are MCP-independent Python APIs and are not exposed as MCP tools or a UI yet.
+
+- `scene_image_service.py` generates a scene image sequentially from its approved prompt, verifies the PNG, and writes a versioned path to the scene manifest only after success.
+- `scene_video_service.py` animates one approved scene image at a time with the verified LTX workflow. It validates the project, scene, image and prompt; checks workflow/model compatibility; uploads, submits, polls and downloads the MP4; verifies it with ffprobe; and updates only the target scene after verification.
+- `video_workflows.json` keeps ComfyUI node IDs and verified settings out of service code. `workflow_adapter.py` validates and patches workflow copies without modifying `ltx_image_to_video_api.json`.
+- Animation defaults are 768x512, 97 frames at 24 FPS (about 4.04 s). Custom dimensions, frames, FPS and seed are validated but were not separately smoke-tested. Planned scene duration is never treated as the generated duration; actual duration is measured after download.
+- Outputs are written as `projects/{project_id}/video/scenes/scene-NNN-title.mp4` with `-v2`, `-v3`, and so on for regenerations. Finished files are never overwritten.
+- Job tracking includes ComfyUI prompt ID, status, timestamps, attempts, errors and output path, with retry, regeneration, timeout and queued-job cancellation support. A failed job leaves the previous successful path unchanged.
+- A default animation prompt is not used unless explicitly supplied or permitted by the caller.
 
 ## Target architecture
 
@@ -136,7 +165,7 @@ Business logic will remain independent of MCP tool definitions.
 ### Software
 
 - OpenCode 2.3.0
-- ComfyUI Desktop 0.45.3 at `http://127.0.0.1:8000`
+- ComfyUI Desktop 0.46.x at `http://127.0.0.1:8000`
 - Python 3.11.9 for project environments
 - FFmpeg and ffprobe 9.0.1 (essentials build) on PATH: `C:\ffmpeg\ffmpeg-9.0.1-essentials_build\bin`
 - Git 2.54.0.windows.1 or newer
@@ -207,8 +236,11 @@ Endpoints used:
 - `POST /upload/image`
 - `POST /prompt`
 - `GET /history/{prompt_id}`
+- `GET /object_info`
+- `GET /view`
+- `POST /queue` for queued-prompt cancellation
 
-The tested workflow is `ltx_image_to_video_api.json`.
+The tested workflow is `ltx_image_to_video_api.json`. It is registered for scene animation in `video_workflows.json` and is never modified by the service.
 
 Key settings:
 
@@ -406,7 +438,7 @@ Do not commit or upload:
 
 `.gitignore` is configured for these exclusions while preserving source code, workflow JSON, documentation, and dependency manifests.
 
-The project has a local Git repository with no commits and no remote. No remote will be added and nothing will be pushed until the GitHub repository URL and visibility are confirmed.
+The project has a local Git repository with an `origin` remote configured. Milestone 2C changes are uncommitted; no remote operations are performed without explicit approval.
 
 ## Development roadmap
 
@@ -419,9 +451,11 @@ The project has a local Git repository with no commits and no remote. No remote 
 7. **Hinglish and Hindi quality evaluation** — pending
 8. **Audio utilities for duration, normalization, and time-stretch** — planned
 9. **TTS MCP tools** — completed and verified
-10. **Storyboard and `scenes.json` manifest** — planned
-11. **Scene rendering pipeline** — planned
-12. **FFmpeg merge and validation** — completed for Phase 1; music, SFX and subtitles still planned
+10. **Storyboard and `scenes.json` manifest** — completed
+11. **Character identity and visual prompt composition** — completed
+12. **Scene image generation** — completed
+13. **Scene animation** — completed
+14. **FFmpeg merge and validation** — completed for Phase 1; music, SFX, subtitles and final assembly still planned
 
 ## License
 

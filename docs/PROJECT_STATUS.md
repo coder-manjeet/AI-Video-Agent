@@ -1,14 +1,27 @@
 # Project Status
 
-Last updated: 2026-11-20
+Last updated: 2026-11-22
 
 ## Current milestone
 
-Milestone 2B — Character Identity and Visual Consistency Foundation — is complete and verified.
+Milestone 2C — Independent Scene Animation — is complete and verified.
 
-Projects now have a structured `project.json`, a scene manifest at `script/scenes.json`, dedicated project/scene/character services, a validation layer, a sequential timeline planner, an independent scene image-generation service, and a reusable character identity + visual prompt composition foundation. All business logic lives in MCP-independent modules. The three existing MCP servers, their configurations, `opencode.json`, `ltx_image_to_video_api.json`, `z_image_turbo_text_to_image_api.json`, TTS, FFmpeg behaviour, existing tests and previously generated media are unchanged. No video generation, final rendering or UI was added.
+Projects now have a structured `project.json`, a scene manifest at `script/scenes.json`, dedicated project/scene/character services, a validation layer, a sequential timeline planner, an independent scene image-generation service, a reusable character identity + visual prompt composition foundation, and an independent sequential scene-animation service. All business logic lives in MCP-independent modules. The three existing MCP servers, their configurations, `opencode.json`, `ltx_image_to_video_api.json`, `z_image_turbo_text_to_image_api.json`, TTS, FFmpeg behaviour, existing tests and previously generated media are unchanged. Final rendering, audio/subtitle integration, MCP tools for the new services and UI were not added.
 
-The complete test suite is **201 passed** (167 previous + 34 new); ruff and mypy pass.
+The complete test suite is **234 passed** (201 previous + 33 new); ruff and mypy pass.
+
+### Milestone 2C work
+
+- Added `video_workflows.json`: a declarative registry for the verified LTX image-to-video workflow. Node IDs, expected classes/model values, image/prompt/frame/FPS bindings, validated limits and the `gifs` output from `VHS_VideoCombine` live in configuration rather than in service code.
+- Extended `workflow_adapter.py` additively with image, frame and FPS bindings, an output `check_input` flag for history-only output keys and an `extract_output_entry` alias. Existing image-generation behaviour and tests are unchanged.
+- Added generic `download_output_file`, `get_object_info` and `cancel_prompt` helpers to `comfyui_client.py`; `download_output_image` delegates to the generic downloader. No service implements its own HTTP client.
+- Added `scene_video_service.py`: validates the project, scene, approved image and prompt; checks workflow structure and configured model availability; uploads the image; patches a fresh workflow copy; submits, polls and downloads the MP4; and verifies it with ffprobe. Jobs run one at a time under an `asyncio.Lock`.
+- The job registry records job/project/scene IDs, ComfyUI prompt ID, status, timestamps, output path, attempt count and errors. Submission retries, polling timeouts, cancellation, job retries, scene retries and regeneration are supported; a failed job never replaces the last successful scene path.
+- Versioned MP4s are written under `projects/{project_id}/video/scenes/` and are never overwritten. A single scene-manifest write registers `generated_video_path` and `status="video_generated"` only after verification. Planned scene duration stays separate from measured `actual_duration_s`.
+- A default animation prompt is available only when explicitly supplied or permitted per call or service construction; otherwise a missing prompt is an actionable eligibility error.
+- Added 33 fully mocked tests (`tests/test_video_workflow_adapter.py`, `tests/test_scene_video_service.py`); no GPU, ComfyUI server or live network is required.
+- Ran one controlled live GPU job (prompt `35056b30-8ee9-45b9-9106-c241f4c9ba7a`, job `f8cb79b56ccd4f3ab2b247e4f0cc1ac7`) in a temporary project. The downloaded MP4 was 413,338 bytes and ffprobe confirmed 4.041667 s, 768x512, 24 FPS, h264 in an MP4 container; manifest metadata was written only for that verified scene.
+- Recorded the architecture decision in [ADR 0009](adr/0009-independent-scene-animation.md).
 
 ### Milestone 2B work
 
@@ -90,10 +103,15 @@ A live render combined the existing `ltxv_00006.mp4` clip with the verified Engl
 | GPU | RTX 5060 Ti, `sm_120` |
 | English / Hindi GPU inference (prior milestone) | Passed; quality review still pending for Hindi |
 | `python -m ruff check .` | Passed |
-| `python -m mypy server.py comfyui_client.py tts_service.py tts_server.py tts_worker.py media_service.py media_server.py` | Passed |
-| `python -m pytest -q` | 201 passed (167 previous + 34 new) |
-| New modules: ruff / mypy | Passed (18 source files) |
+| `python -m mypy server.py comfyui_client.py tts_service.py tts_server.py tts_worker.py media_service.py media_server.py workflow_adapter.py scene_video_service.py` | Passed |
+| `python -m pytest -q` | 234 passed (201 previous + 33 new) |
+| New modules: ruff / mypy | Passed (19 source files) |
 | Scene project smoke checks | Directory scaffold, manifest round-trip, traversal rejection and timeline recalculation covered by unit tests |
+| Scene animation mocked checks | 33 tests cover eligibility, workflow patching, submission retries, polling, timeout, download verification, versioning, manifest writes, failed-job preservation, retries, regeneration and cancellation |
+| Live workflow preflight | LTX registry validation passed; configured CLIP/checkpoint models found through ComfyUI `/object_info` |
+| Live scene animation job | Prompt `35056b30-8ee9-45b9-9106-c241f4c9ba7a`, job `f8cb79b56ccd4f3ab2b247e4f0cc1ac7`; completed successfully |
+| Live scene MP4 verification | 413,338 bytes; 4.041667 s; 768x512; 24 FPS; h264; MP4 container |
+| Live manifest registration | One target scene updated with generation metadata after verification; no other scene changed |
 | `opencode mcp list` | `local-media-agent`, `local-tts-agent`, `local-video-agent` all connected |
 | MCP `list_tools` (media) | `probe_media`, `merge_narration`, `validate_media` |
 | MCP `probe_media` on source video / narration | Correct durations, codecs and stream metadata |
@@ -129,13 +147,16 @@ validation duration delta: 0.01 s (within 0.5 s tolerance)
 - Hinglish has no official Chatterbox code; its script heuristic routes to `hi` or `en` but remains untested.
 - Perceptual A/V sync and narration intelligibility are not automatically assessed; validation is stream/metadata level only.
 - Large renders are synchronous per request; queueing and concurrency are future work.
-- The scene foundation and image-generation service have no MCP tools and no UI yet; callers use the Python services directly.
-- Final video assembly, multi-track audio, subtitles and per-scene video generation are still future milestones.
+- The scene foundation, image-generation service and scene-animation service have no MCP tools and no UI yet; callers use the Python services directly.
+- Final video assembly, multi-track audio and subtitles are still future milestones. Scene animation is available as a Python service but is not integrated into final rendering or MCP.
+- Custom animation dimensions, frames and FPS are exposed with validated limits, but only the verified LTX defaults (768x512, 97 frames, 24 FPS) were smoke-tested.
+- Cancellation deletes queued ComfyUI prompts only; an already-running job cannot be forcibly stopped through the current API helper.
+- LTX scene clips are silent and are checked with `probe_media()` plus video-only assertions; `validate_media()` is not suitable because it requires an audio stream.
 - The Z-Image Turbo workflow does not support negative prompts or reference-image conditioning; supplied values are recorded as metadata and reported as warnings rather than silently applied.
 - Real character identity preservation needs conditioning models/custom nodes that are not installed locally; Milestone 2B provides prompt-level consistency only and makes no guarantee. Enabling reference conditioning requires approval before installing models or nodes, plus a new verified workflow.
 - Character registry and visual identity have no MCP tools and no UI yet; callers use the Python services directly.
 - ComfyUI retains loaded models between jobs; sequential generation protects VRAM but does not unload models automatically.
-- The Git repository has local commits and an `origin` remote; no commits were made in Milestones 1, 2A or 2B.
+- The Git repository has local commits and an `origin` remote; Milestone 2C changes are uncommitted and no remote operations were performed.
 
 ## Environment rules
 
@@ -150,4 +171,4 @@ validation duration delta: 0.01 s (within 0.5 s tolerance)
 
 ## Next action
 
-Milestone 2B is complete. Wait for user confirmation before starting the next milestone. Candidate work includes real reference-image conditioning (requires model/custom-node approval and a new verified workflow), MCP tools for the new services, per-scene video generation and final assembly without changing the three existing MCP servers. Do not start multi-scene video rendering, subtitles or dependency installs without that confirmation. The Chatterbox model weights are cached; no further Hugging Face download is needed.
+Milestone 2C is complete. Wait for user confirmation before starting the next milestone. Candidate work includes MCP tools for the scene services, final video assembly, audio/subtitle integration and real reference-image conditioning (which requires model/custom-node approval and a new verified workflow), without changing the three existing MCP servers. Do not start final rendering, subtitles or dependency installs without that confirmation. The Chatterbox model weights are cached; no further Hugging Face download is needed.

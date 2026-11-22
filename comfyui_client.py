@@ -155,36 +155,72 @@ async def get_prompt_history(prompt_id: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-async def download_output_image(
-    image: Mapping[str, Any],
-    destination: str | Path,
-    *,
-    overwrite: bool = False,
-) -> Path:
-    """Download a ComfyUI output image to *destination* without overwriting."""
-    filename = image.get("filename")
-    if not isinstance(filename, str) or not filename:
-        raise ValueError("image entry has no filename")
-    target = Path(destination).expanduser().resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and not overwrite:
-        raise FileExistsError(f"Output image already exists: {target}")
-    params = {
-        "filename": filename,
-        "subfolder": image.get("subfolder", ""),
-        "type": image.get("type", "output"),
-    }
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(f"{COMFYUI_URL}/view", params=params)
-        response.raise_for_status()
-        content = response.content
-
-    temp = target.with_name(f".{target.name}.{uuid.uuid4().hex[:8]}.tmp")
-    try:
-        temp.write_bytes(content)
-        temp.replace(target)
-    except BaseException:
-        temp.unlink(missing_ok=True)
-        raise
-    logger.info("Downloaded ComfyUI image to %s", target)
-    return target
+async def get_object_info() -> dict[str, Any]:
+    """Read ComfyUI node definitions, including available model file lists."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(f"{COMFYUI_URL}/object_info")
+        response.raise_for_status()
+        payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+async def cancel_prompt(prompt_id: str) -> bool:
+    """Remove a queued ComfyUI prompt. Returns True when the request succeeded.
+
+    ComfyUI may report a still-running job; deletion only affects jobs that
+    have not started, so callers must still verify job state after cancelling.
+    """
+    if not prompt_id or not isinstance(prompt_id, str):
+        raise ValueError("prompt_id must be a non-empty string")
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            f"{COMFYUI_URL}/queue", json={"delete": prompt_id}
+        )
+        response.raise_for_status()
+    logger.info("Requested cancellation of ComfyUI prompt %s", prompt_id)
+    return True
+
+
+async def download_output_file(
+    output: Mapping[str, Any],
+    destination: str | Path,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Download any ComfyUI output (image or video) without overwriting."""
+    filename = output.get("filename")
+    if not isinstance(filename, str) or not filename:
+        raise ValueError("output entry has no filename")
+    target = Path(destination).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not overwrite:
+        raise FileExistsError(f"Output file already exists: {target}")
+    params = {
+        "filename": filename,
+        "subfolder": output.get("subfolder", ""),
+        "type": output.get("type", "output"),
+    }
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(f"{COMFYUI_URL}/view", params=params)
+        response.raise_for_status()
+        content = response.content
+
+    temp = target.with_name(f".{target.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        temp.write_bytes(content)
+        temp.replace(target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    logger.info("Downloaded ComfyUI output to %s", target)
+    return target
+
+
+async def download_output_image(
+    image: Mapping[str, Any],
+    destination: str | Path,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Download a ComfyUI output image to *destination* without overwriting."""
+    return await download_output_file(image, destination, overwrite=overwrite)
