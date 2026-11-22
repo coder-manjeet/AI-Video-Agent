@@ -29,6 +29,28 @@
         ],
         "cwd": "C:\\AI-Video-Agent",
         "codemode": false
+      },
+      "local-project-agent": {
+        "type": "local",
+        "command": [
+          "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
+          "C:\\AI-Video-Agent\\project_agent_server.py"
+        ],
+        "cwd": "C:\\AI-Video-Agent",
+        "codemode": false
+      },
+      "local-render-agent": {
+        "type": "local",
+        "command": [
+          "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
+          "C:\\AI-Video-Agent\\render_server.py"
+        ],
+        "cwd": "C:\\AI-Video-Agent",
+        "environment": {
+          "PYTHONPATH": "C:\\AI-Video-Agent",
+          "RENDER_JOB_STORE_ROOT": "C:\\AI-Video-Agent\\.render-jobs"
+        },
+        "codemode": false
       }
     }
   }

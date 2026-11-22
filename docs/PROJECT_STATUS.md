@@ -4,11 +4,66 @@ Last updated: 2026-11-22
 
 ## Current milestone
 
-Milestone 2C — Independent Scene Animation — is complete and verified.
+Milestones 3E–3G — Final Render Pipeline — are complete and verified. The
+project can now turn existing scene clips and narration into a final, validated
+MP4 with external subtitles and a machine-readable production report, tracked
+by a persistent job exposed through a dedicated MCP server.
 
-Projects now have a structured `project.json`, a scene manifest at `script/scenes.json`, dedicated project/scene/character services, a validation layer, a sequential timeline planner, an independent scene image-generation service, a reusable character identity + visual prompt composition foundation, and an independent sequential scene-animation service. All business logic lives in MCP-independent modules. The three existing MCP servers, their configurations, `opencode.json`, `ltx_image_to_video_api.json`, `z_image_turbo_text_to_image_api.json`, TTS, FFmpeg behaviour, existing tests and previously generated media are unchanged. Final rendering, audio/subtitle integration, MCP tools for the new services and UI were not added.
+### Milestone 3E–3G work
 
-The complete test suite is **234 passed** (201 previous + 33 new); ruff and mypy pass.
+- Added subtitle generation (`subtitle_models.py`, `subtitle_renderer.py`,
+  `subtitle_service.py`): validated SRT/VTT models, scene- and
+  sentence-granularity timing from narration, verbatim English/Hindi/Hinglish
+  text, verified FFmpeg libass + font detection, and opt-in burn-in via a
+  caller-supplied filter. External tracks are always produced; no word-level
+  timestamps are fabricated.
+- Added persistent jobs (`render_job_models.py`, `render_job_store.py`):
+  validated `RenderConfig`/`RenderJob` models, atomic JSON writes, duplicate
+  active-job/render-ID/job-ID protection, cooperative cancellation, restart
+  recovery and reentrant process + cross-process file locks.
+- Added final assembly (`final_renderer.py`): H.264/AAC/MP4 defaults
+  (1920x1080, 24 FPS, yuv420p, AAC 192 kbps / 48 kHz / stereo), final-frame
+  `tpad` only when audio exceeds video beyond tolerance, no `-shortest`,
+  narration never truncated, temporary render plus metadata verification and
+  collision-checked promotion.
+- Added QA and reports (`final_qa.py`, `render_report.py`): fatal errors are
+  separated from warnings, a job cannot complete with fatal QA errors, and
+  `render_report.json` / `render_report.md` contain project-relative paths only.
+- Added `render_orchestrator.py`: reuses the existing planner, audio production
+  coordinator and media services; reports honest coarse stage progress;
+  observes cooperative cancellation between stages; writes reports; and never
+  starts ComfyUI or TTS GPU work.
+- Added `render_server.py` (`local-render-agent`) with six thin MCP tools:
+  `create_render_job`, `get_render_job`, `list_render_jobs`,
+  `cancel_render_job`, `get_render_report` and `validate_render_output`. Job
+  creation returns immediately with a persistent job ID and runs the
+  orchestrator in `asyncio.to_thread`; FFmpeg/QA never run on the event loop.
+- Backed up `opencode.json` to `opencode.json.bak-20261122-190000`, added the
+  fifth local server entry with an explicit store root, left the four existing
+  entries unchanged, and verified `opencode mcp list` reports all five servers
+  connected with `local-render-agent` exposing six tools.
+- Added 228 new tests covering subtitles, job persistence, final assembly, QA,
+  reports, orchestration and the MCP boundary, including an isolated real-FFmpeg
+  end-to-end render. Full suite: **633 passed**; Ruff, documented mypy and
+  extended mypy over all new modules pass.
+- Recorded the architecture decision in [ADR 0011](adr/0011-final-render-pipeline.md).
+
+Milestone 2D — Project MCP Server — remains complete and verified.
+
+Projects now have a structured `project.json`, a scene manifest at `script/scenes.json`, dedicated project/scene/character services, a validation layer, a sequential timeline planner, an independent scene image-generation service, a reusable character identity + visual prompt composition foundation, an independent sequential scene-animation service, and a dedicated `local-project-agent` MCP server with thirteen tools. All business logic lives in MCP-independent modules. The three existing MCP servers, their services, both workflow JSON files, TTS, FFmpeg behaviour, existing tests and previously generated media are unchanged. `opencode.json` was backed up and gained one new fourth entry. Final rendering, audio/subtitle integration, UI and cross-process GPU coordination were not added.
+
+The complete test suite is **633 passed**; ruff and both mypy scopes (documented and extended over all new modules) pass.
+
+### Milestone 2D work
+
+- Added `project_agent_server.py` (`local-project-agent`) with exactly thirteen thin MCP tools: `create_project`, `list_projects`, `get_project`, `add_scene`, `list_scenes`, `update_scene`, `generate_scene_image`, `get_scene_image_job`, `retry_scene_image`, `generate_scene_video`, `get_scene_video_job`, `retry_scene_video` and `cancel_scene_video`.
+- Services are instantiated lazily and shared: one `ProjectService`, `SceneService`, `CharacterService`, `SceneImageService` and `SceneVideoService`. The projects root is the explicit absolute `Path(__file__).resolve().parent / "projects"` with `PROJECT_AGENT_PROJECTS_ROOT` as an optional override.
+- Generation tools are non-blocking: they start strong-referenced `asyncio` tasks, return a `submission_id` immediately, best-effort link the service `job_id`, and expose polling by submission ID or service job ID. Expected service errors become `status="error"` results; service status, warnings, paths and errors are preserved.
+- Retry semantics match the services: image retry creates a new service job ID, while video retry reuses the existing job ID and increments `attempt`. Cancellation uses the service for known jobs and cancels the tracked task before a service job exists; unsupported cancellation is preserved.
+- A shared `asyncio.Lock` serialises image and video generation **within this server only**. It does not coordinate GPU work from other MCP processes, including TTS or the legacy video server. No cross-process locking was introduced.
+- Added 33 fully mocked tests (`tests/test_project_agent_server.py`) covering registration, forwarding, project/scene operations, validation, non-blocking generation, job mapping and transitions, retry asymmetry, cancellation, task exceptions, shutdown, unknown IDs and the shared lock. No ComfyUI, GPU, TTS, FFmpeg or real media generation is used.
+- Backed up `opencode.json` to `opencode.json.bak-20261122-185551`, added the fourth local server entry, left the existing three entries unchanged, and verified `opencode mcp list` reports all four servers connected.
+- Recorded the architecture decision in [ADR 0010](adr/0010-project-mcp-server.md).
 
 ### Milestone 2C work
 
@@ -103,16 +158,20 @@ A live render combined the existing `ltxv_00006.mp4` clip with the verified Engl
 | GPU | RTX 5060 Ti, `sm_120` |
 | English / Hindi GPU inference (prior milestone) | Passed; quality review still pending for Hindi |
 | `python -m ruff check .` | Passed |
-| `python -m mypy server.py comfyui_client.py tts_service.py tts_server.py tts_worker.py media_service.py media_server.py workflow_adapter.py scene_video_service.py` | Passed |
-| `python -m pytest -q` | 234 passed (201 previous + 33 new) |
-| New modules: ruff / mypy | Passed (19 source files) |
+| `python -m mypy server.py comfyui_client.py tts_service.py tts_server.py tts_worker.py media_service.py media_server.py project_agent_server.py` | Passed |
+| `python -m pytest -q` | 633 passed (405 before Milestone 3E–3G + 228 new) |
+| New modules: ruff / extended mypy | Passed (all new source files, 10-source-file Mypy scope) |
 | Scene project smoke checks | Directory scaffold, manifest round-trip, traversal rejection and timeline recalculation covered by unit tests |
 | Scene animation mocked checks | 33 tests cover eligibility, workflow patching, submission retries, polling, timeout, download verification, versioning, manifest writes, failed-job preservation, retries, regeneration and cancellation |
 | Live workflow preflight | LTX registry validation passed; configured CLIP/checkpoint models found through ComfyUI `/object_info` |
 | Live scene animation job | Prompt `35056b30-8ee9-45b9-9106-c241f4c9ba7a`, job `f8cb79b56ccd4f3ab2b247e4f0cc1ac7`; completed successfully |
 | Live scene MP4 verification | 413,338 bytes; 4.041667 s; 768x512; 24 FPS; h264; MP4 container |
 | Live manifest registration | One target scene updated with generation metadata after verification; no other scene changed |
-| `opencode mcp list` | `local-media-agent`, `local-tts-agent`, `local-video-agent` all connected |
+| `opencode mcp list` | All five servers connected: `local-media-agent`, `local-project-agent`, `local-render-agent`, `local-tts-agent`, `local-video-agent` |
+| MCP registration (`local-project-agent`) | 13 tools registered in the mocked FastMCP test |
+| MCP registration (`local-render-agent`) | Six tools registered and verified in the mocked FastMCP test |
+| Isolated end-to-end render | Real tiny FFmpeg fixtures produced a validated 64x48 / 10 FPS MP4 with SRT/VTT and both reports; original assets and manifests unchanged |
+| Job persistence check | Completed job reloaded unchanged from a fresh store instance |
 | MCP `list_tools` (media) | `probe_media`, `merge_narration`, `validate_media` |
 | MCP `probe_media` on source video / narration | Correct durations, codecs and stream metadata |
 | MCP `merge_narration` with `extend_video` | Rendered and validated new MP4 in 4.25 s |
@@ -146,29 +205,31 @@ validation duration delta: 0.01 s (within 0.5 s tolerance)
 - Hindi output quality still needs human evaluation; the smoke test only proves the pipeline runs.
 - Hinglish has no official Chatterbox code; its script heuristic routes to `hi` or `en` but remains untested.
 - Perceptual A/V sync and narration intelligibility are not automatically assessed; validation is stream/metadata level only.
-- Large renders are synchronous per request; queueing and concurrency are future work.
-- The scene foundation, image-generation service and scene-animation service have no MCP tools and no UI yet; callers use the Python services directly.
-- Final video assembly, multi-track audio and subtitles are still future milestones. Scene animation is available as a Python service but is not integrated into final rendering or MCP.
+- Render jobs are persistent and polled asynchronously, but a global file lock serialises job mutations and renders across processes; parallel rendering is not supported.
+- The scene foundation, image-generation service and scene-animation service are exposed through `local-project-agent`, but there is still no UI. Character registry and visual identity remain Python APIs only.
+- Final assembly, narration arrangement, external subtitles, QA and production reports are implemented and integrated by `render_orchestrator.py`. Sentence-level subtitle timings are estimates by character count, not word alignment; precise cue review is still manual. Burn-in depends on local libass and a verified font, so external subtitle files are the guaranteed fallback.
 - Custom animation dimensions, frames and FPS are exposed with validated limits, but only the verified LTX defaults (768x512, 97 frames, 24 FPS) were smoke-tested.
 - Cancellation deletes queued ComfyUI prompts only; an already-running job cannot be forcibly stopped through the current API helper.
 - LTX scene clips are silent and are checked with `probe_media()` plus video-only assertions; `validate_media()` is not suitable because it requires an audio stream.
 - The Z-Image Turbo workflow does not support negative prompts or reference-image conditioning; supplied values are recorded as metadata and reported as warnings rather than silently applied.
 - Real character identity preservation needs conditioning models/custom nodes that are not installed locally; Milestone 2B provides prompt-level consistency only and makes no guarantee. Enabling reference conditioning requires approval before installing models or nodes, plus a new verified workflow.
-- Character registry and visual identity have no MCP tools and no UI yet; callers use the Python services directly.
+- Character registry and visual identity have no dedicated MCP tools and no UI yet; callers use the Python services directly.
+- The project MCP server's GPU lock is in-process only; other MCP processes can still overlap GPU work, so the one-GPU-job-at-a-time rule remains a manual constraint. Render job locks coordinate render jobs only, not ComfyUI/TTS GPU work.
+- Restart recovery fails jobs that were active when a previous process exited; there is no in-place resume. Stale cross-process lock files use mtime/timeout, so a freshly orphaned lock can block up to the configured timeout.
 - ComfyUI retains loaded models between jobs; sequential generation protects VRAM but does not unload models automatically.
-- The Git repository has local commits and an `origin` remote; Milestone 2C changes are uncommitted and no remote operations were performed.
+- The Git repository has local commits and an `origin` remote; Milestone 2D changes are uncommitted and no remote operations were performed.
 
 ## Environment rules
 
-- `.venv` is for MCP and dev tooling; it runs all three MCP servers and has no Torch.
+- `.venv` is for MCP and dev tooling; it runs all five MCP servers and has no Torch.
 - `.venv-tts` is the only TTS environment and is used by `tts_worker.py`.
 - Never mix or recreate either environment without approval.
 - Never upgrade, downgrade, or replace Torch, TorchAudio, or CUDA in `.venv-tts`.
 - Never run TTS and ComfyUI GPU jobs at the same time.
 - An empty ComfyUI queue is not enough: an idle ComfyUI session can retain ~11.5 GB VRAM. Check `GET /system_stats` before a TTS GPU job; if free VRAM is low, call `POST /free` with `{"unload_models":true,"free_memory":true}` and verify free VRAM before proceeding.
-- `.env` files are gitignored and not auto-loaded; set variables in the PowerShell session. Relevant overrides: `TTS_SUBPROCESS_TIMEOUT_S`, `MEDIA_FFMPEG_BIN`, `MEDIA_FFPROBE_BIN`, `MEDIA_FFMPEG_TIMEOUT_S`, `MEDIA_FFPROBE_TIMEOUT_S`.
+- `.env` files are gitignored and not auto-loaded; set variables in the PowerShell session. Relevant overrides: `TTS_SUBPROCESS_TIMEOUT_S`, `MEDIA_FFMPEG_BIN`, `MEDIA_FFPROBE_BIN`, `MEDIA_FFMPEG_TIMEOUT_S`, `MEDIA_FFPROBE_TIMEOUT_S`, `PROJECT_AGENT_PROJECTS_ROOT`, `RENDER_JOB_STORE_ROOT`.
 - FFmpeg renders must go to a temporary file and be validated with ffprobe before promotion. Never overwrite finished media without explicit authorization.
 
 ## Next action
 
-Milestone 2C is complete. Wait for user confirmation before starting the next milestone. Candidate work includes MCP tools for the scene services, final video assembly, audio/subtitle integration and real reference-image conditioning (which requires model/custom-node approval and a new verified workflow), without changing the three existing MCP servers. Do not start final rendering, subtitles or dependency installs without that confirmation. The Chatterbox model weights are cached; no further Hugging Face download is needed.
+Milestones 3E–3G are complete. Wait for user confirmation before starting further work. Candidate next steps include a web UI over the five existing MCP servers, character-registry MCP tools, real reference-image conditioning (which requires model/custom-node approval and a new verified workflow), word-level subtitle alignment and cross-process GPU coordination. Do not install dependencies or change existing MCP servers, workflows or generated media without that confirmation. The Chatterbox model weights are cached; no further Hugging Face download is needed.

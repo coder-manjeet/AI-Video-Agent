@@ -24,14 +24,14 @@ into a validated, YouTube-ready MP4 using local models and services.
 | TTS MCP integration | Verified end to end |
 | FFmpeg / ffprobe availability | 9.0.1 essentials build on PATH |
 | FFmpeg media service (Phase 1) | Complete |
-| Media MCP integration | Connected — three independent servers registered |
+| Media MCP integration | Connected — four independent servers registered |
 | Live narrated MP4 | Verified — `test-output/first_narrated_video.mp4` |
-| Scene project/scene/character services | Complete — Python APIs, no MCP tools yet |
+| Project/scene MCP integration | Complete — `local-project-agent`, 13 tools connected |
 | Scene image generation | Complete — mocked tests plus one live GPU job |
 | Scene animation | Complete — mocked tests plus one live GPU job |
 | Git repository / remote | Local repository with `origin` configured; no push performed |
 
-The repository contains a working three-server MCP integration plus MCP-independent scene project, image-generation and animation services. The broader architecture is being introduced gradually without breaking that integration.
+The repository contains a working four-server MCP integration. Project, scene, image-generation and animation services remain MCP-independent Python modules and are exposed through thin tools in `local-project-agent`. The broader architecture is being introduced gradually without breaking that integration.
 
 ## Development workflow
 
@@ -73,6 +73,7 @@ C:\AI-Video-Agent\
 ├── tts_worker.py                   # .venv-tts generation worker
 ├── media_service.py                # FFmpeg/ffprobe operations (no MCP imports)
 ├── media_server.py                 # FastMCP tools for local-media-agent
+├── project_agent_server.py         # FastMCP tools for local-project-agent
 ├── project_models.py               # typed project and scene manifests
 ├── project_paths.py                # path safety and atomic JSON writes
 ├── project_service.py              # project lifecycle and metadata
@@ -112,9 +113,32 @@ Defined in `media_server.py` (`local-media-agent`):
 - `merge_narration(video_path, narration_path, output_path, volume=1.0, duration_policy="trim_audio", overwrite=False, timeout_s=None)` — renders a validated MP4 and reports every duration adjustment
 - `validate_media(path, expected_duration_s=None, duration_tolerance_s=0.5, timeout_s=None)` — structured existence/readability, stream and duration checks
 
+Defined in `project_agent_server.py` (`local-project-agent`):
+
+Project and scenes:
+
+- `create_project(project_id, title, description="", language="en", status="active", settings=None)` — creates a project scaffold; never overwrites an existing project
+- `list_projects()` — lists project IDs, titles and statuses, reporting corrupt manifests per item
+- `get_project(project_id)` — loads one full `project.json` manifest
+- `add_scene(project_id, title, duration=5.0, scene_id=None, description="", narration="", image_prompt="", animation_prompt="", negative_prompt="", character_references=None, status="draft")` — appends and renumbers a scene
+- `list_scenes(project_id)` — lists full scene records in manifest order
+- `update_scene(project_id, scene_id, title=None, description=None, duration=None, narration=None, image_prompt=None, animation_prompt=None, negative_prompt=None, status=None, character_ids=None, character_references=None)` — applies only supplied fields
+
+Images and animation:
+
+- `generate_scene_image(project_id, scene_id, workflow=None, positive_prompt=None, negative_prompt=None, width=None, height=None, seed=None, steps=None, cfg=None, regenerate=False, compose_prompt=False, prompt_language=None, character_references=None, visual_style=None, color_palette=None, character_appearance=None, timeout_s=None, poll_interval_s=None)` — submits a job and returns a `submission_id` immediately
+- `get_scene_image_job(submission_id=None, job_id=None)` — polls by submission or service job ID
+- `retry_scene_image(project_id, scene_id, timeout_s=None, poll_interval_s=None)` — retries the latest failed/timed-out image job; creates a new job ID
+- `generate_scene_video(project_id, scene_id, workflow=None, animation_prompt=None, negative_prompt=None, width=None, height=None, frames=None, fps=None, seed=None, regenerate=False, allow_default_prompt=False, timeout_s=None, poll_interval_s=None)` — submits an animation job without blocking
+- `get_scene_video_job(submission_id=None, job_id=None)` — polls by submission or service job ID
+- `retry_scene_video(project_id, scene_id, timeout_s=None, poll_interval_s=None)` — retries the latest failed/timed-out/cancelled video job; reuses the job ID and increments `attempt`
+- `cancel_scene_video(job_id=None, submission_id=None)` — uses service cancellation for a known job, or cancels the tracked task before a job exists
+
+Generation is serialised inside `local-project-agent` by an in-process `asyncio.Lock`. It does not coordinate GPU work from other MCP processes, including TTS or the legacy video server. See [ADR 0010](docs/adr/0010-project-mcp-server.md).
+
 ## Scene services (Python APIs)
 
-The scene services are MCP-independent Python APIs and are not exposed as MCP tools or a UI yet.
+The scene, image and animation services are MCP-independent Python APIs exposed through `local-project-agent`; there is no UI yet. Character registry and visual identity remain Python APIs only.
 
 - `scene_image_service.py` generates a scene image sequentially from its approved prompt, verifies the PNG, and writes a versioned path to the scene manifest only after success.
 - `scene_video_service.py` animates one approved scene image at a time with the verified LTX workflow. It validates the project, scene, image and prompt; checks workflow/model compatibility; uploads, submits, polls and downloads the MP4; verifies it with ffprobe; and updates only the target scene after verification.
@@ -258,7 +282,7 @@ Important: this workflow has already been tested successfully. Do not replace it
 
 ## MCP configuration
 
-`opencode.json` registers three independent local servers:
+`opencode.json` registers four independent local servers:
 
 ```json
 {
@@ -291,6 +315,15 @@ Important: this workflow has already been tested successfully. Do not replace it
         ],
         "cwd": "C:\\AI-Video-Agent",
         "codemode": false
+      },
+      "local-project-agent": {
+        "type": "local",
+        "command": [
+          "C:\\AI-Video-Agent\\.venv\\Scripts\\python.exe",
+          "C:\\AI-Video-Agent\\project_agent_server.py"
+        ],
+        "cwd": "C:\\AI-Video-Agent",
+        "codemode": false
       }
     }
   }
@@ -308,9 +341,22 @@ get_audio_metadata
 probe_media
 merge_narration
 validate_media
+create_project
+list_projects
+get_project
+add_scene
+list_scenes
+update_scene
+generate_scene_image
+get_scene_image_job
+retry_scene_image
+generate_scene_video
+get_scene_video_job
+retry_scene_video
+cancel_scene_video
 ```
 
-All three MCP servers run under `.venv`. `generate_speech` launches `tts_worker.py` with `.venv-tts` so Torch and Chatterbox stay out of the MCP process; `get_audio_metadata` needs no model at all. See [ADR 0004](docs/adr/0004-tts-mcp-subprocess-isolation.md). The media server calls FFmpeg/ffprobe through `media_service.py`; see [ADR 0005](docs/adr/0005-media-service-and-duration-policies.md). `opencode.json` was backed up to `opencode.json.bak-20261118-000343` before the third server was registered.
+All four MCP servers run under `.venv`. `generate_speech` launches `tts_worker.py` with `.venv-tts` so Torch and Chatterbox stay out of the MCP process; `get_audio_metadata` needs no model at all. See [ADR 0004](docs/adr/0004-tts-mcp-subprocess-isolation.md). The media server calls FFmpeg/ffprobe through `media_service.py`; see [ADR 0005](docs/adr/0005-media-service-and-duration-policies.md). The project server shares the existing services and uses `PROJECT_AGENT_PROJECTS_ROOT` only as an optional projects-root override; see [ADR 0010](docs/adr/0010-project-mcp-server.md). `opencode.json` was backed up to `opencode.json.bak-20261118-000343` before the third server and to `opencode.json.bak-20261122-185551` before the fourth.
 
 ## TTS setup — installed, smoke tests passed
 
@@ -438,7 +484,7 @@ Do not commit or upload:
 
 `.gitignore` is configured for these exclusions while preserving source code, workflow JSON, documentation, and dependency manifests.
 
-The project has a local Git repository with an `origin` remote configured. Milestone 2C changes are uncommitted; no remote operations are performed without explicit approval.
+The project has a local Git repository with an `origin` remote configured. Milestone 2D changes are uncommitted; no remote operations are performed without explicit approval.
 
 ## Development roadmap
 
@@ -456,6 +502,7 @@ The project has a local Git repository with an `origin` remote configured. Miles
 12. **Scene image generation** — completed
 13. **Scene animation** — completed
 14. **FFmpeg merge and validation** — completed for Phase 1; music, SFX, subtitles and final assembly still planned
+15. **Project MCP server** — completed and verified (`local-project-agent`, 13 tools)
 
 ## License
 
